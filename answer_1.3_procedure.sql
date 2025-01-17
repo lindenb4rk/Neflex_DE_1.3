@@ -1,72 +1,94 @@
-/*
-DO $$
-declare 
-my_date date := '01-02-2018'; 
-begin
+--анонимный блок и логирование после процедуры
 
-insert into logs.logs_ds
-(etl_table, date_start, operation_status)
-values ('dm_f101_round_f',clock_timestamp()::TIME,9);
-
-call DM.FILL_F101_ROUND_F(my_date);
-
-UPDATE logs.logs_ds 
-SET
-DATE_END = NOW()::TIME,
-OPERATION_STATUS = 0,
-TIME_ETL = clock_timestamp()::TIME - DATE_START
-WHERE
-OPERATION_STATUS = 9;
-
-end $$ LANGUAGE PLPGSQL;
-
----
-SELECT * FROM DM.DM_F101_ROUND_F;
-
-DELETE FROM DM.DM_F101_ROUND_F;
-*/
 
 CREATE
 OR REPLACE PROCEDURE DM.FILL_F101_ROUND_F (ION_DATE DATE) AS $$
 begin
-create table table_1 as 
-select 
-(ION_DATE - interval '1 month')::date as from_date,
-(ION_DATE  - interval '1 day')::date as to_date,
-"CHAPTER",
-"LEDGER_ACCOUNT",
-acc."CHAR_TYPE" as CHARACTERISTIC,
-sum(acc_b.balance_out_rub) FILTER(where acc."CURRENCY_CODE" = '810' or acc."CURRENCY_CODE" = '643') as BALANCE_IN_RUB,
-sum(acc_b.balance_out_rub) FILTER(where acc."CURRENCY_CODE" <> '810' and acc."CURRENCY_CODE" <> '643') as BALANCE_IN_VAL,
-sum(acc_b.balance_out_rub) as BALANCE_IN_TOTAL 
-from DS.MD_LEDGER_ACCOUNT_S as ldg
-join ds.md_account_d as acc on ldg."LEDGER_ACCOUNT" = left(acc."ACCOUNT_NUMBER",5)::integer
---берём записи баланса за день предшедствующий отчётному периоду
-left join dm.dm_account_balance_f as acc_b on acc_b.on_date = (((ION_DATE - interval '1 month') - interval '1 day')::date)  
-and acc_b.account_rk = acc."ACCOUNT_RK"
-group by ldg."LEDGER_ACCOUNT","CHAPTER",acc."CHAR_TYPE";
+CREATE TABLE table_1 as 
+SELECT
+	(ION_DATE - INTERVAL '1 month')::DATE AS FROM_DATE,
+	(ION_DATE - INTERVAL '1 day')::DATE AS TO_DATE,
+	"CHAPTER",
+	"LEDGER_ACCOUNT",
+	ACC."CHAR_TYPE" AS CHARACTERISTIC,
+	SUM(ACC_B.BALANCE_OUT_RUB) FILTER (
+		WHERE
+			ACC."CURRENCY_CODE" = '810'
+			OR ACC."CURRENCY_CODE" = '643'
+	) AS BALANCE_IN_RUB,
+	SUM(ACC_B.BALANCE_OUT_RUB) FILTER (
+		WHERE
+			ACC."CURRENCY_CODE" <> '810'
+			AND ACC."CURRENCY_CODE" <> '643'
+	) AS BALANCE_IN_VAL,
+	SUM(ACC_B.BALANCE_OUT_RUB) AS BALANCE_IN_TOTAL
+FROM
+	DS.MD_LEDGER_ACCOUNT_S AS LDG
+	JOIN DS.MD_ACCOUNT_D AS ACC ON LDG."LEDGER_ACCOUNT" = LEFT(ACC."ACCOUNT_NUMBER", 5)::INTEGER
+	--берём записи баланса за день предшедствующий отчётному периоду
+	LEFT JOIN DM.DM_ACCOUNT_BALANCE_F AS ACC_B ON ACC_B.ON_DATE = (
+		(
+			(ION_DATE - INTERVAL '1 month') - INTERVAL '1 day'
+		)::DATE
+	)
+	AND ACC_B.ACCOUNT_RK = ACC."ACCOUNT_RK"
+GROUP BY
+	LDG."LEDGER_ACCOUNT",
+	"CHAPTER",
+	ACC."CHAR_TYPE";
 
 
 ---------for DEBET,CREDIT,BALANCE end-----------
-create table table_2 as
-select 
-"LEDGER_ACCOUNT",
-sum(acc_tur.debet_amount_rub) FILTER(where acc."CURRENCY_CODE" = '810' or acc."CURRENCY_CODE" = '643') as TURN_DEB_RUB ,
-sum(acc_tur.debet_amount_rub) FILTER(where acc."CURRENCY_CODE" <> '810' and acc."CURRENCY_CODE" <> '643') as TURN_DEB_VAL,
-sum(acc_tur.debet_amount_rub)as TURN_DEB_TOTAL ,
-sum(acc_tur.CREDIT_AMOUNT_RUB) FILTER(where acc."CURRENCY_CODE" = '810' or acc."CURRENCY_CODE" = '643') as TURN_CRE_RUB ,
-sum(acc_tur.CREDIT_AMOUNT_RUB) FILTER(where acc."CURRENCY_CODE" <> '810' and acc."CURRENCY_CODE" <> '643') as TURN_CRE_VAL ,
-sum(acc_tur.CREDIT_AMOUNT_RUB) as TURN_CRE_TOTAL,
-sum(acc_b.balance_out_rub) FILTER(where acc."CURRENCY_CODE" = '810' or acc."CURRENCY_CODE" = '643'  and acc_b.on_date = (ION_DATE  - interval '1 day')::date) as BALANCE_OUT_RUB ,
-sum(acc_b.balance_out_rub) FILTER(where acc."CURRENCY_CODE" <> '810' and acc."CURRENCY_CODE" <> '643' and acc_b.on_date = (ION_DATE  - interval '1 day')::date) as BALANCE_OUT_VAL ,
-sum(acc_b.balance_out_rub) FILTER(where  acc_b.on_date = (ION_DATE  - interval '1 day')::date) 
-as BALANCE_OUT_TOTAL 
-from DS.MD_LEDGER_ACCOUNT_S as ldg
-join ds.md_account_d as acc on ldg."LEDGER_ACCOUNT" = left(acc."ACCOUNT_NUMBER",5)::integer
-left join DM.DM_ACCOUNT_TURNOVER_F as acc_tur on acc_tur.account_rk = acc."ACCOUNT_RK" and acc_tur.on_date between (ION_DATE - interval '1 month')::date and
-(ION_DATE  - interval '1 day')::date
-left join dm.dm_account_balance_f as acc_b on acc_b.on_date = (ION_DATE  - interval '1 day')::date and acc_b.account_rk = acc."ACCOUNT_RK"
-group by ldg."LEDGER_ACCOUNT";
+CREATE TABLE table_2 as
+SELECT
+	"LEDGER_ACCOUNT",
+	SUM(ACC_TUR.DEBET_AMOUNT_RUB) FILTER (
+		WHERE
+			ACC."CURRENCY_CODE" = '810'
+			OR ACC."CURRENCY_CODE" = '643'
+	) AS TURN_DEB_RUB,
+	SUM(ACC_TUR.DEBET_AMOUNT_RUB) FILTER (
+		WHERE
+			ACC."CURRENCY_CODE" <> '810'
+			AND ACC."CURRENCY_CODE" <> '643'
+	) AS TURN_DEB_VAL,
+	SUM(ACC_TUR.DEBET_AMOUNT_RUB) AS TURN_DEB_TOTAL,
+	SUM(ACC_TUR.CREDIT_AMOUNT_RUB) FILTER (
+		WHERE
+			ACC."CURRENCY_CODE" = '810'
+			OR ACC."CURRENCY_CODE" = '643'
+	) AS TURN_CRE_RUB,
+	SUM(ACC_TUR.CREDIT_AMOUNT_RUB) FILTER (
+		WHERE
+			ACC."CURRENCY_CODE" <> '810'
+			AND ACC."CURRENCY_CODE" <> '643'
+	) AS TURN_CRE_VAL,
+	SUM(ACC_TUR.CREDIT_AMOUNT_RUB) AS TURN_CRE_TOTAL,
+	SUM(ACC_B.BALANCE_OUT_RUB) FILTER (
+		WHERE
+			ACC."CURRENCY_CODE" = '810'
+			OR ACC."CURRENCY_CODE" = '643'
+			AND ACC_B.ON_DATE = (ION_DATE - INTERVAL '1 day')::DATE
+	) AS BALANCE_OUT_RUB,
+	SUM(ACC_B.BALANCE_OUT_RUB) FILTER (
+		WHERE
+			ACC."CURRENCY_CODE" <> '810'
+			AND ACC."CURRENCY_CODE" <> '643'
+			AND ACC_B.ON_DATE = (ION_DATE - INTERVAL '1 day')::DATE
+	) AS BALANCE_OUT_VAL,
+	SUM(ACC_B.BALANCE_OUT_RUB) FILTER (
+		WHERE
+			ACC_B.ON_DATE = (ION_DATE - INTERVAL '1 day')::DATE
+	) AS BALANCE_OUT_TOTAL
+FROM
+	DS.MD_LEDGER_ACCOUNT_S AS LDG
+	JOIN DS.MD_ACCOUNT_D AS ACC ON LDG."LEDGER_ACCOUNT" = LEFT(ACC."ACCOUNT_NUMBER", 5)::INTEGER
+	LEFT JOIN DM.DM_ACCOUNT_TURNOVER_F AS ACC_TUR ON ACC_TUR.ACCOUNT_RK = ACC."ACCOUNT_RK"
+	AND ACC_TUR.ON_DATE BETWEEN (ION_DATE - INTERVAL '1 month')::DATE AND (ION_DATE - INTERVAL '1 day')::DATE
+	LEFT JOIN DM.DM_ACCOUNT_BALANCE_F AS ACC_B ON ACC_B.ON_DATE = (ION_DATE - INTERVAL '1 day')::DATE
+	AND ACC_B.ACCOUNT_RK = ACC."ACCOUNT_RK"
+GROUP BY
+	LDG."LEDGER_ACCOUNT";
 
 
 INSERT INTO dm.dm_f101_round_f 
@@ -95,6 +117,27 @@ FROM
 drop table table_1;
 drop table table_2;
 
-
 		end ;
  $$ LANGUAGE PLPGSQL;
+
+
+--анонимный блок и логирование
+ DO $$
+declare 
+my_date date := '01-02-2018'; 
+begin
+insert into logs.logs_ds
+(etl_table, date_start, operation_status)
+values ('dm_f101_round_f',clock_timestamp()::TIME,9);
+
+call DM.FILL_F101_ROUND_F(my_date);
+
+UPDATE logs.logs_ds 
+SET
+DATE_END = NOW()::TIME,
+OPERATION_STATUS = 0,
+TIME_ETL = clock_timestamp()::TIME - DATE_START
+WHERE
+OPERATION_STATUS = 9;
+
+end $$ LANGUAGE PLPGSQL;
